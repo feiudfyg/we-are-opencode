@@ -1,7 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { readFileSync, existsSync } from "node:fs"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
 import { randomUUID } from "node:crypto"
+import { fileURLToPath } from "node:url"
 
 /**
  * we-are-opencode —— v1.0（2026-08-17）：Oh-We 首轮锚定 + default.txt 全程 system + 懒加载技能注入
@@ -164,8 +165,9 @@ assistant: Clients are marked as failed in the \`connectToServer\` function in s
 `
 
 // 懒加载技能映射表（关键词 → SKILL.md 路径），每次消息实时读取（热更新）
-const MAP_PATH =
-  process.env.LAZY_SKILLS_MAP ?? join(import.meta.dir, "skills-map.json")
+// 插件目录：opencode（Bun）下有 import.meta.dir；Node 下回退 fileURLToPath
+const PLUGIN_DIR = import.meta.dir ?? dirname(fileURLToPath(import.meta.url))
+const MAP_PATH = process.env.LAZY_SKILLS_MAP ?? join(PLUGIN_DIR, "skills-map.json")
 
 type SkillRules = Record<string, string[]>
 
