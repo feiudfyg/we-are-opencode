@@ -13,17 +13,25 @@ import { randomUUID } from "node:crypto"
  * 机制（对齐 OAS 两阶段 agent 切换语义，persona 换成 default.txt）：
  *   1. 会话首条消息（chat.message，count = 0）：记录恢复目标 + 改写 oh-we
  *      （首轮窄工具面 read/bash/edit/write + webfetch，与 OAS minimal 一致）
- *   2. system 层（system.transform，每轮请求前必触发）：锚定会话全程 system
+ *   2. 首轮完全移除 MCP（模型状态与未连接 MCP 一致）：
+ *      - MCP 服务器工具（如 ida-pro-mcp_xxx）由 oh-we 权限 "*_*": deny 屏蔽
+ *        （MCP 工具名 = sanitize(server)_sanitize(tool)，必含下划线）
+ *      - MCP 资源工具（list_mcp_resources / list_mcp_resource_templates /
+ *        read_mcp_resource）被 opencode 内部映射到 read 权限、agent 权限无法
+ *        单独屏蔽，因此首条消息注入 tools=false 过滤（消息级、只影响首轮）
+ *      - system 全程替换为 default.txt，天然不含 <mcp_instructions> 段
+ *   3. system 层（system.transform，每轮请求前必触发）：锚定会话全程 system
  *      替换为 default.txt 全文——首轮与后续都只用 default.txt 作为 system
- *   3. 恢复（统一时间点）：第一个模型请求发起时（system.transform 首次触发）
+ *   4. 恢复（统一时间点）：第一个模型请求发起时（system.transform 首次触发）
  *      switchAgent 回恢复目标 —— switchAgent 语义是 "subsequent provider turns"，
  *      不影响当前请求，因此：
- *      第一个请求 = oh-we（窄工具面 + default.txt system）
- *      第二个请求起 = 恢复目标 agent（build 会话 = build）全工具 + default.txt system
- *   4. 第二条消息兜底（chat.message，count > 0 且仍 oh-we）：消息 agent 改回
+ *      第一个请求 = oh-we（窄工具面 + 无 MCP + default.txt system）
+ *      第二个请求起 = 恢复目标 agent 全工具 + MCP 全开放 + default.txt system
+ *   5. 第二条消息兜底（chat.message，count > 0 且仍 oh-we）：消息 agent 改回
  *      恢复目标（防 switchAgent 失败；消息级改写只对本回合生效）
- *   5. 恢复目标 = 会话自身 agent：build 会话 → build；子代理 general → general；
- *      用户手动选 oh-we → restoreAgent（build）
+ *   6. 恢复目标：build 会话 → full-we（与原版 build 区分：提示词已换为
+ *      default.txt，仅名称不同、权限与 build 完全一致）；子代理 general →
+ *      general；用户手动选 oh-we → restoreAgent（full-we）
  *
  * 懒加载技能（并入 lazy-skill-loader 的 keyword-skills 机制）：
  *   - chat.message 扫描用户消息文本，命中 skills-map.json 关键词即把对应
@@ -31,12 +39,21 @@ import { randomUUID } from "node:crypto"
  *   - 每会话每技能只注入一次（进程内去重）；映射表每次消息实时读取（热更新）
  *
  * 配置（环境变量，可选）：
- *   WE_ARE_OPENCODE_RESTORE_AGENT —— 恢复目标（用户手动选 oh-we 的会话），默认 build
+ *   WE_ARE_OPENCODE_RESTORE_AGENT —— 恢复目标（用户手动选 oh-we 的会话），默认 full-we
  *   LAZY_SKILLS_MAP —— skills-map.json 路径，默认本文件同目录
  */
 
 const ANCHOR_AGENT = "oh-we"
-const DEFAULT_RESTORE_AGENT = "build"
+const FULL_AGENT = "full-we"
+const DEFAULT_RESTORE_AGENT = FULL_AGENT
+// 首轮需屏蔽的 MCP 资源工具。opencode 的 Permission.disabled 把这些工具
+// 映射到 read 权限（session/tools.ts），agent 权限无法单独屏蔽，
+// 只能通过首条消息的 tools=false 在 resolveTools 阶段过滤。
+const MCP_RESOURCE_TOOLS = [
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+]
 
 // default.txt 全文（we-are-opencode 唯一 system 来源；与仓库根 default.txt 内容一致）
 const SYSTEM_PROMPT = `We are opencode, an interactive CLI tool that helps users with software engineering tasks. We need to use the instructions below and the tools available to assist the user.
@@ -154,7 +171,7 @@ type SkillRules = Record<string, string[]>
 
 // 锚定会话（首条消息已锚定到 oh-we、system 被替换为 default.txt）
 const anchored = new Set<string>()
-// 恢复目标（主会话 oh-we→build；子代理 general→general）
+// 恢复目标（主会话 build→full-we；子代理 general→general）
 const restoreTarget = new Map<string, string>()
 // 已完成 switchAgent 恢复（system.transform 每轮触发，避免重复）
 const restored = new Set<string>()
@@ -228,10 +245,14 @@ export const WeAreOpencodePlugin: Plugin = async ({ client }) => {
 
       if (count === 0) {
         // 首条消息：记录恢复目标 + 改写 oh-we（首轮窄工具面 + default.txt system）
-        // 恢复目标 = 会话自身 agent（build→build，general→general）；
-        // 用户手动选 oh-we → restoreAgent（build）
+        // 恢复目标：build 会话 → full-we（与原版 build 区分，仅名称不同）；
+        // 其他 agent 会话 → 自身（general→general）；用户手动选 oh-we → restoreAgent（full-we）
         const target =
-          input.agent === ANCHOR_AGENT ? restoreAgent : input.agent || restoreAgent
+          input.agent === ANCHOR_AGENT
+            ? restoreAgent
+            : input.agent === "build"
+              ? FULL_AGENT
+              : input.agent || restoreAgent
         restoreTarget.set(sessionID, target)
         restored.delete(sessionID)
         anchored.add(sessionID)
@@ -239,6 +260,14 @@ export const WeAreOpencodePlugin: Plugin = async ({ client }) => {
           const msg = output?.message as { info?: { agent?: string }; agent?: string } | undefined
           if (msg?.info) msg.info.agent = ANCHOR_AGENT
           else if (msg?.agent) msg.agent = ANCHOR_AGENT
+        }
+        // 首轮完全移除 MCP：MCP 服务器工具由 oh-we 权限 "*_*": deny 屏蔽；
+        // MCP 资源工具被 opencode 映射到 read 权限，用消息级 tools=false 过滤
+        const msgTools = output?.message as { tools?: Record<string, boolean> } | undefined
+        if (msgTools) {
+          const tools: Record<string, boolean> = msgTools.tools ?? {}
+          for (const tool of MCP_RESOURCE_TOOLS) tools[tool] = false
+          msgTools.tools = tools
         }
       } else if (anchored.has(sessionID) && input.agent === ANCHOR_AGENT) {
         // 第二条消息兜底：若 switchAgent 尚未生效（仍是 oh-we），改回恢复目标
@@ -260,9 +289,10 @@ export const WeAreOpencodePlugin: Plugin = async ({ client }) => {
 
     // system 层 + 统一恢复点：
     // 锚定会话每次请求 system 替换为 default.txt 全文（首轮与后续一致）；
-    // 首次触发时立即 switchAgent 回恢复目标。switchAgent 只影响
-    // subsequent provider turns，当前请求保持 oh-we 窄工具面，
-    // 第二个请求起恢复目标 agent 全工具（system 仍为 default.txt）。
+    // 首次触发时立即 switchAgent 回恢复目标（build 会话 = full-we）。
+    // switchAgent 只影响 subsequent provider turns，当前请求保持 oh-we
+    // 窄工具面 + 无 MCP；第二个请求起恢复目标 agent 全工具 + MCP 全开放
+    // （system 仍为 default.txt）。
     "experimental.chat.system.transform": async (input: any, output: any) => {
       const sessionID = input?.sessionID
       if (!sessionID || !anchored.has(sessionID)) return
