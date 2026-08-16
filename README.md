@@ -112,4 +112,4 @@ python skill_register.py --name <name> --remove    # 注销技能
 
 ## License
 
-MIT
+[GNU Affero General Public License v3.0](./LICENSE) (AGPL-3.0)
