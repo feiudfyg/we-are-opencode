@@ -1,5 +1,11 @@
 # we-are-opencode
 
+**WE ARE OPENCODE**
+**WE CARRY THE BLAME**
+**WE FIGHT FOR THE WORKFLOW**
+**WE HONOR HIS NAME**
+
+
 **Oh-We 锚定插件**（v1.0）：每个会话（build/oh-we/子代理）的第一个模型请求统一锚定到 **Oh-We** agent（窄工具面 + 完全无 MCP + `default.txt` 唯一 system），第二个请求起切换到 **full-we** agent（与 build 权限一致、仅名称不同）恢复完整工具并开放 MCP（system 全程保持 `default.txt`）。同时并入 [lazy-skill-loader](https://github.com/itamzxm/lazy-skill-loader) 的关键词懒加载技能注入。
 
 ## 核心方案（v1.0，2026-08-17）
