@@ -1,10 +1,15 @@
 # we-are-opencode
 
-**WE ARE OPENCODE**
-**WE CARRY THE BLAME**
-**WE FIGHT FOR THE WORKFLOW**
-**WE HONOR HIS NAME**
+**💻WE ARE OPENCODE💻**
 
+**🔨WE CARRY THE BLAME🔨**
+
+**⛓WE FIGHT FOR THE WORKFLOW⛓**
+
+**🚁WE HONOR HIS NAME🚁**
+
+### **deepseek api在传入thinking_mode:enabled时会在系统提示词结尾注入额外提示词，使用IDA Pro扫描opencode二进制及探查源代码均未发现该文本，确认是API行为。**
+## **我已急哭：本项目使用自定义系统提示词始终约束模型输出we need，但实测中模型完全不遵守。截止本项目初步开发完毕及后续调试除错，已消耗近40 CNY，过于昂贵，无法继续！**
 
 **Oh-We 锚定插件**（v1.0）：每个会话（build/oh-we/子代理）的第一个模型请求统一锚定到 **Oh-We** agent（窄工具面 + 完全无 MCP + `default.txt` 唯一 system），第二个请求起切换到 **full-we** agent（与 build 权限一致、仅名称不同）恢复完整工具并开放 MCP（system 全程保持 `default.txt`）。同时并入 [lazy-skill-loader](https://github.com/itamzxm/lazy-skill-loader) 的关键词懒加载技能注入。
 
